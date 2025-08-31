@@ -51,11 +51,11 @@ namespace cpplearn {
 		}
 
 		bool empty() const {
-			return (head_.load(std::memory_order_acquire) == tail_.load(std::memory_order_acquire));
+			return head_.load(std::memory_order_acquire) == tail_.load(std::memory_order_acquire);
 		}
 
 		bool full() const {
-			return (increment(tail_.load(std::memory_order_acquire)) == head_.load(std::memory_order_acquire));
+			return increment(tail_.load(std::memory_order_acquire)) == head_.load(std::memory_order_acquire);
 		}
 
 		void clear() {
@@ -70,7 +70,7 @@ namespace cpplearn {
 		T *data_;
 		std::allocator<T> allocator_;
 
-		// 由于生产者和消费者频繁读写tail和head，让他们强制以64字节对齐，避免将映射到同一cache中导致伪共享等问题。
+		// 由于生产者和消费者频繁读写tail和head，让他们强制以64字节对齐，避免将数据映射到同一cache中导致伪共享等问题。
 		alignas(64) std::atomic<size_t> head_{0};
 		char pad_[64 - sizeof(std::atomic<size_t>)]; // 仅用于占位，无需初始化
 		alignas(64) std::atomic<size_t> tail_{0};

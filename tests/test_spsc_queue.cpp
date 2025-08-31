@@ -2,58 +2,51 @@
 #include "doctest/doctest.h"
 #include "spsc_queue.h"
 #include <string>
+#include <thread>
+#include <atomic>
 
 struct TestObj {
-	int id;
-	std::string name;
+    int id;
+    std::string name;
 
-	template<typename S>
-	// S是一个万能引用，配合forward实现完美转发
-	TestObj(const int i, S &&name) : id(i), name(std::forward<S>(name)) {
-	}
+    template<typename S>
+    TestObj(const int i, S&& name) : id(i), name(std::forward<S>(name)) {}
 
-	TestObj() : id(0) {
-	}
+    TestObj() : id(0) {}
 };
 
+/* ---------- 单线程 ---------- */
 TEST_CASE("SPSCQueue basic int enqueue/dequeue") {
-	cpplearn::SPSCQueue<int> q(3);
-	CHECK(q.empty());
-	CHECK_FALSE(q.full());
-	CHECK(q.enqueue(1));
-	CHECK(q.enqueue(2));
-	CHECK(q.enqueue(3));
-	CHECK_FALSE(q.enqueue(4)); // 队列已满
+    cpplearn::SPSCQueue<int> q(3);
+    CHECK(q.empty());
+    CHECK_FALSE(q.full());
+    CHECK(q.enqueue(1));
+    CHECK(q.enqueue(2));
+    CHECK(q.enqueue(3));
+    CHECK_FALSE(q.enqueue(4)); // 队列已满
 
-	int val = 0;
-	CHECK(q.dequeue(val));
-	CHECK(val == 1);
-	CHECK(q.dequeue(val));
-	CHECK(val == 2);
-	CHECK(q.dequeue(val));
-	CHECK(val == 3);
-	CHECK_FALSE(q.dequeue(val));
-	CHECK(q.empty());
+    int val = 0;
+    CHECK(q.dequeue(val)); CHECK(val == 1);
+    CHECK(q.dequeue(val)); CHECK(val == 2);
+    CHECK(q.dequeue(val)); CHECK(val == 3);
+    CHECK_FALSE(q.dequeue(val));
+    CHECK(q.empty());
 }
 
 TEST_CASE("SPSCQueue with custom object") {
-	cpplearn::SPSCQueue<TestObj> q(2);
-	CHECK(q.empty());
-	CHECK_FALSE(q.full());
-	CHECK(q.enqueue(1, "Alice"));
-	CHECK(q.enqueue(2, "Bob"));
-	CHECK_FALSE(q.enqueue(3, "xf"));
-	CHECK(q.full());
+    cpplearn::SPSCQueue<TestObj> q(2);
+    CHECK(q.empty());
+    CHECK_FALSE(q.full());
+    CHECK(q.enqueue(1, "Alice"));
+    CHECK(q.enqueue(2, "Bob"));
+    CHECK_FALSE(q.enqueue(3, "xf"));
+    CHECK(q.full());
 
-	TestObj obj;
-	CHECK(q.dequeue(obj));
-	CHECK(obj.id == 1);
-	CHECK(obj.name == "Alice");
-	CHECK(q.dequeue(obj));
-	CHECK(obj.id == 2);
-	CHECK(obj.name == "Bob");
-	CHECK_FALSE(q.dequeue(obj));
-	CHECK(q.empty());
+    TestObj obj;
+    CHECK(q.dequeue(obj)); CHECK(obj.id == 1); CHECK(obj.name == "Alice");
+    CHECK(q.dequeue(obj)); CHECK(obj.id == 2); CHECK(obj.name == "Bob");
+    CHECK_FALSE(q.dequeue(obj));
+    CHECK(q.empty());
 }
 
 TEST_CASE("SPSCQueue clear()") {
@@ -66,4 +59,36 @@ TEST_CASE("SPSCQueue clear()") {
 	CHECK(q.empty());
 	int val;
 	CHECK_FALSE(q.dequeue(val));
+}
+
+/* ---------- 多线程 ---------- */
+TEST_CASE("SPSCQueue multi-producer single-consumer") {
+    constexpr size_t kCapacity   = 1024;
+    constexpr int    kPerThread  = 1'000'000;
+    cpplearn::SPSCQueue<int> q(kCapacity);
+
+    std::atomic<int> produced{0};
+    std::atomic<int> consumed{0};
+
+    std::thread producer([&] {
+        for (int i = 0; i < kPerThread; ++i) {
+            while (!q.enqueue(i)) std::this_thread::yield();
+            ++produced;
+        }
+    });
+
+    std::thread consumer([&] {
+        int v;
+        for (int i = 0; i < kPerThread; ++i) {
+            while (!q.dequeue(v)) std::this_thread::yield();
+            ++consumed;
+        }
+    });
+
+    producer.join();
+    consumer.join();
+
+    CHECK(produced.load() == kPerThread);
+    CHECK(consumed.load()  == kPerThread);
+    CHECK(q.empty());
 }
